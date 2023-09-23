@@ -11,81 +11,9 @@ const OUT_ENDPOINT_ADDR: u8 = 0x2;
 
 const TIMEOUT: Duration = Duration::from_millis(1000);
 
-// fn wait_until_ready(h: & mut DeviceHandle) {
-//     let mut buf = [0; 2];
-//     loop {
-//         h.write_bulk(OUT_ENDPOINT_ADDR, &[0x00, 0x00], TIMEOUT).unwrap();
-//         let read = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-//         for b in &buf[..read] {
-//             print!("{b:02X} ");
-//         }
-//         println!();
 
-//         if read == 2 && buf == [0x15, 0x31] {
-//             return;
-//         }
-//     }
-// }
-
-// fn get_slots(h: &mut DeviceHandle) {
-//     h.write_bulk(OUT_ENDPOINT_ADDR, b"GT0001", TIMEOUT).unwrap();
-
-//     let mut buf = [0; 2048];
-//     let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-//     println!("{:?}", buf[..len].hex_dump());
-//     let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-//     println!("{:?}", buf[..len].hex_dump());
-// }
-
-fn startup(h: &mut DeviceHandle) {
-    h.write_bulk(OUT_ENDPOINT_ADDR, b"ST", TIMEOUT).unwrap();
-
-    let mut buf = [0; 2048];
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-}
-
-fn rt0(h: &mut DeviceHandle) {
-    h.write_bulk(OUT_ENDPOINT_ADDR, b"RT0", TIMEOUT).unwrap();
-
-    let mut buf = [0; 2048];
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-}
-
-fn rt1(h: &mut DeviceHandle) {
-    h.write_bulk(OUT_ENDPOINT_ADDR, b"RT1", TIMEOUT).unwrap();
-
-    let mut buf = [0; 2048];
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-}
-
-fn mn(h: &mut DeviceHandle) {
-    h.write_bulk(OUT_ENDPOINT_ADDR, b"MN", TIMEOUT).unwrap();
-
-    let mut buf = [0; 2048];
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-}
-
-fn sar(h: &mut DeviceHandle) {
-    h.write_bulk(OUT_ENDPOINT_ADDR, b"S", TIMEOUT).unwrap();
-
-    let mut buf = [0; 2048];
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-}
+const RESP_OK: [u8; 2] = [0x6, 0x30];
+const RESP_BADREQ: [u8; 2] = [0x15, 0x32];
 
 fn make_req(h: &mut DeviceHandle, req: &[u8]) {
     println!("REQ: {:?}", std::str::from_utf8(req).unwrap());
@@ -93,9 +21,25 @@ fn make_req(h: &mut DeviceHandle, req: &[u8]) {
 
     let mut buf = [0; 8192];
     let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
-    let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
-    println!("{:?}", buf[..len].hex_dump());
+    
+    if len != 2 {
+        println!("expected 2 bytes from first bulk in, strange");
+        println!("{:?}", buf[..len].hex_dump());
+        return;
+    }
+    let res  = [buf[0], buf[1]];
+    match res {
+        RESP_OK => {
+            let len = h.read_bulk(IN_ENDPOINT_ADDR, &mut buf, TIMEOUT).unwrap();
+            println!("{:?}", buf[..len].hex_dump());
+        }
+        RESP_BADREQ => {
+            println!("bad reqeust")
+        }
+        _ => {
+            panic!("unknown response {:?}", res.hex_dump());
+        }
+    }
 }
 
 
@@ -176,15 +120,21 @@ fn main() {
     make_req(&mut h, b"FTr");
     make_req(&mut h, b"FV");
     make_req(&mut h, b"IUr");
-    make_req(&mut h, b"MI");
-    make_req(&mut h, b"GT0001");
-    make_req(&mut h, b"GA0001,0001");
-    make_req(&mut h, b"MR0001");
+    make_req(&mut h, b"MI"); // this returns (?, how many total captures, how many memory slots they're split across)
+    make_req(&mut h, b"GT0001"); // this returns (the name, number of captures) of "Memory Title" (1)
+    make_req(&mut h, b"GA0001,0001"); // (maybe) get global index of (title 1, capture 1) -> (1)
+    make_req(&mut h, b"MR0001"); // get data for global index 1. returns: 
+    // (?, memory title, 6(??), 1(??), 00(??), 0(??), ??, 0(??), ??, ??, ...) lots here
     make_req(&mut h, b"GA0001,0002");
     make_req(&mut h, b"MR0002");
     make_req(&mut h, b"GA0001,0003");
     make_req(&mut h, b"MR0003");
     make_req(&mut h, b"GA0001,0004");
     make_req(&mut h, b"MR0004");
-    make_req(&mut h, b"ME0004");
+    make_req(&mut h, b"ME0003"); // download data for global index (3)
+    make_req(&mut h, b"ST");
+    make_req(&mut h, b"RT0");
+    make_req(&mut h, b"RT1");
+
+    h.unconfigure().unwrap();
 }
