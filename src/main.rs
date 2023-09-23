@@ -590,6 +590,5 @@ fn main() {
         *local_capture_id,
         Path::new(&line.trim()),
     );
-
-    h.unconfigure().unwrap();
+    make_req(&mut h, b"ST");
 }
