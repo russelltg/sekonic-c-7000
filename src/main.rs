@@ -78,7 +78,9 @@ impl<'a> ParseHelper<'a> {
             return None;
         }
 
-        if to_parse[name.len()..name.len() + 2] != b"@@"[..] {
+        // both of these seem to happen. idk if there's rhyme or reason to it
+        let next2 = &to_parse[name.len()..name.len() + 2];
+        if next2 != &b"@@"[..] && next2 != [0x40, 0x20] {
             return None;
         }
 
