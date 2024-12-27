@@ -11,8 +11,8 @@ use std::{
 };
 
 use anyhow::{bail, format_err};
-use libusb::{DeviceHandle, TransferType};
 use pretty_hex::PrettyHex;
+use rusb::{DeviceHandle, Direction, GlobalContext, TransferType};
 
 const VENDOR_ID: u16 = 0x0a41;
 const PRODUCT_ID: u16 = 0x7003;
@@ -39,7 +39,7 @@ impl From<Vec<u8>> for HVec {
     }
 }
 
-fn make_req(h: &mut DeviceHandle, req: &[u8]) -> Vec<u8> {
+fn make_req(h: &mut DeviceHandle<GlobalContext>, req: &[u8]) -> Vec<u8> {
     // println!("REQ: {:?}", std::str::from_utf8(req).unwrap());
     h.write_bulk(OUT_ENDPOINT_ADDR, req, TIMEOUT).unwrap();
 
@@ -179,7 +179,7 @@ impl StorageInfoResp {
     }
 }
 
-fn get_storage_info(d: &mut DeviceHandle) -> StorageInfoResp {
+fn get_storage_info(d: &mut DeviceHandle<GlobalContext>) -> StorageInfoResp {
     StorageInfoResp::parse(&make_req(d, b"MI"))
 }
 
@@ -201,13 +201,17 @@ impl TitleInfo {
 }
 
 // 1 indexed
-fn get_title_info(d: &mut DeviceHandle, id: u32) -> TitleInfo {
+fn get_title_info(d: &mut DeviceHandle<GlobalContext>, id: u32) -> TitleInfo {
     assert!(id > 0);
     TitleInfo::parse(&make_req(d, format!("GT{id:04}").as_bytes()))
 }
 
 // 1 indexed
-fn get_global_capture_id(d: &mut DeviceHandle, title_id: u32, local_capture_id: u32) -> u32 {
+fn get_global_capture_id(
+    d: &mut DeviceHandle<GlobalContext>,
+    title_id: u32,
+    local_capture_id: u32,
+) -> u32 {
     assert!(title_id > 0);
     assert!(local_capture_id > 0);
 
@@ -332,7 +336,7 @@ impl CaptureInfo {
     }
 }
 
-fn get_capture_info(d: &mut DeviceHandle, global_capture_id: u32) -> CaptureInfo {
+fn get_capture_info(d: &mut DeviceHandle<GlobalContext>, global_capture_id: u32) -> CaptureInfo {
     CaptureInfo::parse(&make_req(d, format!("MR{global_capture_id:04}").as_bytes()))
 }
 
@@ -393,7 +397,7 @@ impl CaptureData {
     }
 }
 
-fn get_capture_data(d: &mut DeviceHandle, global_capture_id: u32) -> CaptureData {
+fn get_capture_data(d: &mut DeviceHandle<GlobalContext>, global_capture_id: u32) -> CaptureData {
     CaptureData::parse(&make_req(d, format!("ME{global_capture_id:04}").as_bytes()))
 }
 
@@ -480,8 +484,7 @@ fn write_csv(cd: &CaptureData, ci: &CaptureInfo, local_capture_idx: u32, path: &
 }
 
 fn main() {
-    let ctx = libusb::Context::new().unwrap();
-    let devs = ctx.devices().unwrap();
+    let devs = rusb::devices().unwrap();
 
     let d = devs
         .iter()
@@ -507,7 +510,7 @@ fn main() {
                 out_endpoint = None;
                 in_endpoint = None;
                 for endpoint_desc in interface_desc.endpoint_descriptors() {
-                    if endpoint_desc.direction() == libusb::Direction::Out
+                    if endpoint_desc.direction() == Direction::Out
                         && endpoint_desc.transfer_type() == TransferType::Bulk
                     {
                         println!(
@@ -520,7 +523,7 @@ fn main() {
                         );
                         out_endpoint = Some(endpoint_desc.address());
                     }
-                    if endpoint_desc.direction() == libusb::Direction::In
+                    if endpoint_desc.direction() == Direction::In
                         && endpoint_desc.transfer_type() == TransferType::Bulk
                     {
                         println!(
@@ -535,6 +538,7 @@ fn main() {
                     }
                 }
                 if let (Some(out), Some(i)) = (out_endpoint, in_endpoint) {
+                    // h.reset().unwrap();
                     h.set_active_configuration(config_desc.number()).unwrap();
                     h.claim_interface(interface_desc.interface_number())
                         .unwrap();
@@ -571,26 +575,28 @@ fn main() {
         }
     }
 
-    println!("select a number to dump");
-    let mut line = String::new();
-    let (global_id, (ci, local_capture_id)) = loop {
+    loop {
+        println!("select a number to dump");
+        let mut line = String::new();
+        let (global_id, (ci, local_capture_id)) = loop {
+            stdin().read_line(&mut line).unwrap();
+            match line.trim().parse() {
+                Ok(i) => match cap_infos.get(&i) {
+                    Some(ci) => break (i, ci),
+                    None => println!("{i} was not a valid choice"),
+                },
+                Err(_) => println!("enter a number"),
+            }
+        };
+        println!("enter filename: ");
+        line.clear();
         stdin().read_line(&mut line).unwrap();
-        match line.trim().parse() {
-            Ok(i) => match cap_infos.get(&i) {
-                Some(ci) => break (i, ci),
-                None => println!("{i} was not a valid choice"),
-            },
-            Err(_) => println!("enter a number"),
-        }
-    };
-    println!("enter filename: ");
-    line.clear();
-    stdin().read_line(&mut line).unwrap();
-    write_csv(
-        &get_capture_data(&mut h, global_id),
-        ci,
-        *local_capture_id,
-        Path::new(&line.trim()),
-    );
+        write_csv(
+            &get_capture_data(&mut h, global_id),
+            ci,
+            *local_capture_id,
+            Path::new(&line.trim()),
+        );
+    }
     make_req(&mut h, b"ST");
 }
